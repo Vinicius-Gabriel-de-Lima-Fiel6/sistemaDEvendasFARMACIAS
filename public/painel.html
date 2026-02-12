@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Painel Farmácia</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 p-6 font-sans">
+    <div class="max-w-6xl mx-auto">
+        <div class="flex justify-between items-center mb-8">
+            <h1 class="text-2xl font-bold text-gray-800">📦 Painel de Pedidos</h1>
+            <div class="text-sm text-gray-500 flex items-center gap-2">
+                <span class="w-3 h-3 bg-green-500 rounded-full animate-pulse"></span> Sistema Online
+            </div>
+        </div>
+
+        <div id="grid-pedidos" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            </div>
+    </div>
+
+    <script>
+        const API_URL = '/api/pedidos';
+
+        async function carregar() {
+            try {
+                const res = await fetch(API_URL);
+                const pedidos = await res.json();
+                const grid = document.getElementById('grid-pedidos');
+                
+                grid.innerHTML = pedidos.map(p => {
+                    const isPendente = p.status === 'pendente';
+                    const bgClass = isPendente ? 'bg-white border-l-4 border-yellow-400' : 'bg-gray-50 border-l-4 border-green-500 opacity-75';
+                    
+                    return `
+                    <div class="${bgClass} p-5 rounded-lg shadow-sm hover:shadow-md transition">
+                        <div class="flex justify-between items-start mb-4">
+                            <div>
+                                <span class="text-3xl font-bold text-gray-800 block">${p.senha}</span>
+                                <span class="text-xs text-gray-400">ID: ${p.id}</span>
+                            </div>
+                            <span class="px-2 py-1 rounded text-xs font-bold uppercase ${isPendente ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'}">
+                                ${p.status}
+                            </span>
+                        </div>
+                        
+                        <div class="bg-gray-50 p-3 rounded mb-4 h-32 overflow-y-auto">
+                            <p class="text-xs font-bold text-gray-500 uppercase mb-1">Receita Lida:</p>
+                            <ul class="text-sm text-gray-700 space-y-1">
+                                ${p.medicamentos.map(m => `<li>• ${m}</li>`).join('')}
+                            </ul>
+                        </div>
+
+                        ${isPendente ? 
+                            `<button onclick="atualizar(${p.id}, 'pronto')" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded transition">
+                                ⏩ Marcar Pronto
+                             </button>` : 
+                            `<button disabled class="w-full bg-gray-200 text-gray-400 font-bold py-2 rounded cursor-not-allowed">
+                                ✓ Finalizado
+                             </button>`
+                        }
+                    </div>
+                `}).join('');
+            } catch (e) { console.error(e); }
+        }
+
+        async function atualizar(id, status) {
+            await fetch(`${API_URL}/${id}`, {
+                method: 'PATCH',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ status })
+            });
+            carregar();
+        }
+
+        // Atualiza a cada 5 segundos
+        setInterval(carregar, 5000);
+        carregar();
+    </script>
+</body>
+</html>
