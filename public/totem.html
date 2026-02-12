@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Totem Farmácia</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src='https://unpkg.com/tesseract.js@v2.1.0/dist/tesseract.min.js'></script>
+</head>
+<body class="bg-blue-50 h-screen flex flex-col items-center justify-center font-sans">
+
+    <div class="bg-white p-8 rounded-3xl shadow-2xl w-full max-w-md text-center relative">
+        <h1 class="text-3xl font-bold text-blue-600 mb-8">Autoatendimento</h1>
+        
+        <div id="step-1">
+            <div class="border-4 border-dashed border-gray-200 p-10 rounded-xl mb-6 bg-gray-50">
+                <input type="file" id="camera" accept="image/*" capture="environment" class="hidden">
+                <button onclick="document.getElementById('camera').click()" class="bg-blue-600 text-white w-full py-4 rounded-xl text-xl font-bold shadow-lg hover:bg-blue-700 transition">
+                    📸 ESCANEAR RECEITA
+                </button>
+                <p class="mt-4 text-gray-500 text-sm">Aponte para a receita médica</p>
+            </div>
+        </div>
+
+        <div id="loading" class="hidden">
+            <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <p id="status-ocr" class="text-gray-600 font-medium">Lendo imagem...</p>
+        </div>
+
+        <div id="step-2" class="hidden">
+            <h2 class="text-lg font-semibold mb-2 text-left text-gray-700">Detectamos:</h2>
+            <div id="lista-meds" class="text-left mb-6 max-h-40 overflow-y-auto bg-gray-50 p-2 rounded border"></div>
+            
+            <div class="flex gap-2">
+                <button onclick="location.reload()" class="flex-1 bg-gray-300 text-gray-700 py-3 rounded-xl font-bold">Refazer</button>
+                <button onclick="enviarPedido()" class="flex-2 w-full bg-green-500 text-white py-3 rounded-xl font-bold shadow-green-200 shadow-lg">✅ CONFIRMAR</button>
+            </div>
+        </div>
+
+        <div id="step-3" class="hidden">
+            <div class="bg-green-50 p-6 rounded-xl border border-green-200">
+                <p class="text-green-800 font-medium">Pedido Enviado!</p>
+                <h2 id="senha-final" class="text-6xl font-black text-green-600 my-4 tracking-tighter"></h2>
+                <p class="text-gray-500 text-sm">Aguarde sua senha no painel.</p>
+            </div>
+            <button onclick="location.reload()" class="mt-6 text-blue-600 font-semibold hover:underline">Novo Atendimento</button>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = '/api/pedidos'; // Caminho relativo para a Vercel
+        let medsDetectados = [];
+
+        const statusText = document.getElementById('status-ocr');
+        const listaEl = document.getElementById('lista-meds');
+
+        document.getElementById('camera').onchange = async (e) => {
+            const file = e.target.files[0];
+            if(!file) return;
+
+            // UI Changes
+            document.getElementById('step-1').classList.add('hidden');
+            document.getElementById('loading').classList.remove('hidden');
+
+            // OCR Process (Client Side)
+            statusText.innerText = "Processando texto...";
+            
+            try {
+                const { data: { text } } = await Tesseract.recognize(file, 'por', {
+                    logger: m => {
+                        if(m.status === 'recognizing text') {
+                            statusText.innerText = `Lendo: ${Math.round(m.progress * 100)}%`;
+                        }
+                    }
+                });
+
+                // Lógica simples de filtro de palavras (Simulação de IA)
+                // Pega linhas que parecem ter nomes de remédios ou dosagens
+                const linhas = text.split('\n').filter(line => line.length > 4);
+                
+                // Filtro "Fake" inteligente para o MVP: pega qualquer coisa que pareça texto válido
+                // Em produção real, você usaria regex para procurar "mg", "ml", "comprimidos"
+                medsDetectados = linhas.filter(l => l.match(/(\d+mg|\d+ml|comp|uso|via)/i) || l.length > 5).slice(0, 5);
+                
+                if(medsDetectados.length === 0) medsDetectados = ["Texto ilegível - Revisar no balcão"];
+
+                // Renderiza
+                listaEl.innerHTML = medsDetectados.map(m => 
+                    `<div class="p-2 border-b border-gray-200 text-sm text-gray-800 flex items-center">
+                        <span class="mr-2 text-green-500">💊</span> ${m}
+                    </div>`
+                ).join('');
+
+                document.getElementById('loading').classList.add('hidden');
+                document.getElementById('step-2').classList.remove('hidden');
+
+            } catch (err) {
+                alert("Erro ao ler imagem");
+                location.reload();
+            }
+        };
+
+        async function enviarPedido() {
+            document.getElementById('step-2').classList.add('opacity-50');
+            
+            try {
+                const res = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ medicamentos: medsDetectados })
+                });
+                
+                const data = await res.json();
+                document.getElementById('senha-final').innerText = data.senha;
+                
+                document.getElementById('step-2').classList.add('hidden');
+                document.getElementById('step-3').classList.remove('hidden');
+            } catch (error) {
+                alert("Erro de conexão");
+            }
+        }
+    </script>
+</body>
+</html>
