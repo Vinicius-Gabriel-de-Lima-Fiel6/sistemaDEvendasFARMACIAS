@@ -1,14 +1,13 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List
-import os
+import os, random
 from supabase import create_client, Client
 from fastapi.middleware.cors import CORSMiddleware
-import random
 
 app = FastAPI()
 
-# Configuração CORS (Permitir que o frontend fale com o backend)
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -17,46 +16,54 @@ app.add_middleware(
 )
 
 # Conexão Supabase
-url: str = os.environ.get("SUPABASE_URL")
-key: str = os.environ.get("SUPABASE_KEY")
-supabase: Client = create_client(url, key)
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# Modelos de Dados
-class PedidoCreate(BaseModel):
-    medicamentos: List[str]
-
-class PedidoUpdate(BaseModel):
-    status: str
-
-@app.get("/api/health")
-def health():
-    return {"status": "online", "backend": "vercel-python"}
+class PedidoRequest(BaseModel):
+    meds_extraidos: List[str]
 
 @app.post("/api/pedidos")
-def criar_pedido(pedido: PedidoCreate):
-    senha = f"F{random.randint(100, 999)}"
+async def criar_pedido(req: PedidoRequest):
+    senha = f"RX-{random.randint(100, 999)}"
     
-    data = {
-        "senha": senha,
-        "medicamentos": pedido.medicamentos,
-        "status": "pendente"
-    }
+    # 1. Cria o Pedido
+    res_pedido = supabase.table("pedidos").insert({"senha": senha}).execute()
+    pedido_id = res_pedido.data[0]['id']
     
-    response = supabase.table("pedidos").insert(data).execute()
+    total_geral = 0
     
-    # Tratamento de resposta do Supabase (pode variar conforme a versão da lib)
-    if not response.data:
-         raise HTTPException(status_code=500, detail="Erro ao salvar no banco")
-         
-    return response.data[0]
+    # 2. Busca cada medicamento no estoque e vincula
+    for nome_ocr in req.meds_extraidos:
+        # Busca por aproximação (ex: 'Amoxicilina' encontra 'AMOXICILINA 500MG')
+        res_prod = supabase.table("produtos").select("*").ilike("nome", f"%{nome_ocr}%").limit(1).execute()
+        
+        if res_prod.data:
+            prod = res_prod.data[0]
+            if prod['estoque_atual'] > 0:
+                # Adiciona item ao pedido
+                supabase.table("itens_pedido").insert({
+                    "pedido_id": pedido_id,
+                    "produto_id": prod['id'],
+                    "preco_unitario": prod['preco']
+                }).execute()
+                
+                # Baixa estoque
+                supabase.table("produtos").update({"estoque_atual": prod['estoque_atual'] - 1}).eq("id", prod['id']).execute()
+                total_geral += float(prod['preco'])
+
+    # 3. Atualiza o total do pedido
+    supabase.table("pedidos").update({"total": total_geral}).eq("id", pedido_id).execute()
+    
+    return {"id": pedido_id, "senha": senha, "total": total_geral}
 
 @app.get("/api/pedidos")
-def listar_pedidos():
-    # Pega os últimos 50 pedidos, ordenados pelo mais recente
-    response = supabase.table("pedidos").select("*").order("created_at", desc=True).limit(50).execute()
-    return response.data
+async def listar_pedidos():
+    # Retorna pedidos com os nomes dos produtos relacionados
+    res = supabase.table("pedidos").select("*, itens_pedido(preco_unitario, produtos(nome))").order("criado_em", desc=True).execute()
+    return res.data
 
-@app.patch("/api/pedidos/{pedido_id}")
-def atualizar_status(pedido_id: int, update: PedidoUpdate):
-    response = supabase.table("pedidos").update({"status": update.status}).eq("id", pedido_id).execute()
-    return response.data
+@app.patch("/api/pedidos/{id}")
+async def status_pedido(id: int, status_req: dict):
+    res = supabase.table("pedidos").update({"status": status_req['status']}).eq("id", id).execute()
+    return res.data
